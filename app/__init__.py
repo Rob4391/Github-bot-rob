@@ -1,0 +1,2 @@
+"""Git bot PoC package."""
+
