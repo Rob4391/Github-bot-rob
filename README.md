@@ -101,7 +101,47 @@ Recommended GitHub App permissions:
   - `Issues`: Read and write
   - `Metadata`: Read-only
 
-For local testing, expose your local port via ngrok or similar.
+For local testing without a domain, use the one-command Docker tunnel flow below.
+
+## No-Domain Local Mode (One Command)
+
+If you do not own a domain yet, run GitBot + tunnel fully in Docker:
+
+```bash
+make up
+```
+
+Get the public webhook URL:
+
+```bash
+make url
+```
+
+Health check:
+
+```bash
+make health
+```
+
+Live logs:
+
+```bash
+make logs
+```
+
+Stop everything:
+
+```bash
+make down
+```
+
+Set GitHub App webhook to:
+
+- `https://<trycloudflare-url>/webhook`
+
+Important:
+
+- `trycloudflare` URL can change after restart. If it changes, update GitHub webhook URL again.
 
 ## Docker Hub + Global Hosting
 
