@@ -18,6 +18,13 @@ def _optional_env(name: str) -> str | None:
     return value or None
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "")
+    if not raw:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _load_github_app_private_key() -> str | None:
     inline_key = _optional_env("GITHUB_APP_PRIVATE_KEY")
     if inline_key:
@@ -50,6 +57,9 @@ class Settings:
     auto_approve_confidence: float
     max_pr_files: int
     max_patch_chars: int
+    require_green_checks_for_approve: bool
+    high_risk_threshold: int
+    state_file: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -84,4 +94,9 @@ class Settings:
             ),
             max_pr_files=int(os.getenv("MAX_PR_FILES", "60")),
             max_patch_chars=int(os.getenv("MAX_PATCH_CHARS", "8000")),
+            require_green_checks_for_approve=_bool_env(
+                "REQUIRE_GREEN_CHECKS_FOR_APPROVE", True
+            ),
+            high_risk_threshold=int(os.getenv("HIGH_RISK_THRESHOLD", "70")),
+            state_file=os.getenv("STATE_FILE", ".gitbot_state.json"),
         )
