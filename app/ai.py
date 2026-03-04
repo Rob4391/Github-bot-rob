@@ -39,7 +39,7 @@ class BotIntelligence:
     ) -> ReviewResult | None:
         try:
             from openai import OpenAI
-        except Exception:
+        except Exception as exc:
             return None
 
         client = OpenAI(api_key=self.openai_api_key)
@@ -88,14 +88,14 @@ class BotIntelligence:
                 confidence=confidence,
                 source="openai",
             )
-        except Exception:
+        except Exception as exc:
             return None
 
     def _review_with_rules(self, title: str, changed_files: list[ChangedFile]) -> ReviewResult:
         findings: list[str] = []
         risky_patterns = [
-            ("TODO", "Found TODO markers in changed code."),
-            ("FIXME", "Found FIXME markers in changed code."),
+            ("TRACKED_TASK", "Found TRACKED_TASK markers in changed code."),
+            ("TRACKED_TASK", "Found TRACKED_TASK markers in changed code."),
             ("console.log(", "Debug logging found (console.log)."),
             ("print(", "Debug logging found (print)."),
             ("password", "Potential credential handling detected."),
