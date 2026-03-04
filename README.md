@@ -103,6 +103,82 @@ Recommended GitHub App permissions:
 
 For local testing, expose your local port via ngrok or similar.
 
+## Docker Hub + Global Hosting
+
+Docker Hub stores your image only. To run globally, deploy that image on an always-on server.
+
+### 1) Build and push image to Docker Hub
+
+```bash
+docker build -t <dockerhub-user>/github-bot-rob:latest .
+docker push <dockerhub-user>/github-bot-rob:latest
+```
+
+### 2) Prepare server files
+
+On your server, clone this repo and create runtime files:
+
+```bash
+cp .env.example .env
+cp deploy/.env.docker.example deploy/.env.docker
+mkdir -p secrets
+```
+
+Set these values:
+
+- In `.env`:
+  - `GITHUB_APP_ID`
+  - `GITHUB_WEBHOOK_SECRET`
+  - `GITHUB_APP_PRIVATE_KEY_PATH=/run/secrets/github-app.pem`
+  - Optional `OPENAI_API_KEY`
+- In `deploy/.env.docker`:
+  - `DOMAIN` (for example: `bot.yourdomain.com`)
+  - `EMAIL` (for TLS cert notices)
+  - `GITBOT_IMAGE` (for example: `youruser/github-bot-rob:latest`)
+
+Copy your GitHub App private key file to:
+
+```bash
+secrets/github-app.pem
+```
+
+### 3) Start service with HTTPS
+
+```bash
+set -a
+source deploy/.env.docker
+set +a
+docker compose up -d
+```
+
+This starts:
+
+- `gitbot` app container on internal port `8080`
+- `caddy` reverse proxy on `80/443` with automatic HTTPS
+
+### 4) Point GitHub webhook
+
+In GitHub App settings:
+
+- Webhook URL: `https://<DOMAIN>/webhook`
+- Secret: exactly your `GITHUB_WEBHOOK_SECRET`
+
+### 5) Update deployment after new image push
+
+```bash
+set -a
+source deploy/.env.docker
+set +a
+docker compose pull
+docker compose up -d
+```
+
+### Notes
+
+- Persisted bot state is stored in docker volume `gitbot_data` (`STATE_FILE=/data/.gitbot_state.json`).
+- Keep `secrets/github-app.pem` and `.env` out of git.
+- Rotate webhook secret if it was ever exposed.
+
 ## Event Behavior
 
 - PR opened/synchronized/reopened:

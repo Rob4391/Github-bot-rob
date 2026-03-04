@@ -1,0 +1,37 @@
+services:
+  gitbot:
+    image: ${GITBOT_IMAGE:-your-dockerhub-user/github-bot-rob:latest}
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - STATE_FILE=/data/.gitbot_state.json
+    volumes:
+      - gitbot_data:/data
+      - ./secrets/github-app.pem:/run/secrets/github-app.pem:ro
+    ports:
+      - "8080:8080"
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2.8
+    restart: unless-stopped
+    depends_on:
+      - gitbot
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+      - EMAIL=${EMAIL}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  gitbot_data:
+  caddy_data:
+  caddy_config:
