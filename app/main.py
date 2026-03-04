@@ -10,6 +10,7 @@ from .auth import GitHubClientFactory
 from .bot import GitBot
 from .config import Settings
 from .github_ops import GitHubOps
+from .state import BotState
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -20,11 +21,13 @@ settings = Settings.from_env()
 client_factory = GitHubClientFactory(settings=settings)
 github_ops = GitHubOps(client_factory=client_factory)
 brain = BotIntelligence(openai_api_key=settings.openai_api_key, model=settings.openai_model)
-bot = GitBot(settings=settings, github_ops=github_ops, brain=brain)
+state = BotState(path=settings.state_file)
+bot = GitBot(settings=settings, github_ops=github_ops, brain=brain, state=state)
 
 app = FastAPI(title="GitBot Rob PoC", version="0.1.0")
 
 logger.info("GitHub auth mode: %s", settings.auth_mode)
+logger.info("State file: %s", settings.state_file)
 
 
 def verify_signature(secret: str, body: bytes, signature_header: str | None) -> None:
