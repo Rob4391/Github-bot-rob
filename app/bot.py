@@ -561,25 +561,41 @@ class GitBot:
                 return ["meme posted"]
 
             if command == "suggest":
-                last_review = self.state.get_last_review(repo_name, pr_number)
-                if not last_review:
-                    self._safe_issue_comment(
+                use_cached = bool(args and args[0].lower().strip() in {"cache", "cached"})
+                suggestions: list[str] = []
+                if use_cached:
+                    last_review = self.state.get_last_review(repo_name, pr_number)
+                    if last_review:
+                        suggestions = self._normalize_suggestions(
+                            list(last_review.get("suggestions", []))
+                        )
+                else:
+                    profile = self._profile_for_repo(repo_name)
+                    result = self._run_review(
                         repo_name=repo_name,
-                        issue_number=pr_number,
+                        pr_number=pr_number,
                         installation_id=installation_id,
-                        body="No review context found. Run `/gitbot review` first.",
+                        profile=profile,
+                        enabled_checks=set(ALLOWED_CHECKS),
                     )
-                    meme_failed = True
-                    meme_reason = "Suggest failed: no review context"
-                    self._react_to_comment(repo_name, comment_id, "confused", installation_id)
-                    return ["suggest failed: no review context"]
-                suggestions = list(last_review.get("suggestions", []))
+                    self._cache_review(repo_name, pr_number, result)
+                    suggestions = self._suggestions_from_result(result)
+                    if not suggestions and result.source == "llm-unavailable":
+                        cached_review = self.state.get_last_review(repo_name, pr_number)
+                        if cached_review:
+                            suggestions = self._normalize_suggestions(
+                                list(cached_review.get("suggestions", []))
+                            )
                 if not suggestions:
                     self._safe_issue_comment(
                         repo_name=repo_name,
                         issue_number=pr_number,
                         installation_id=installation_id,
-                        body="No concrete suggestions available from the last review.",
+                        body=(
+                            "No concrete PR-content suggestions are available yet.\n\n"
+                            "Run `/gitbot review` once more after pushing updates, "
+                            "or use `/gitbot suggest cached` to view cached items."
+                        ),
                     )
                     meme_reason = "Suggest found no items"
                     self._react_to_comment(repo_name, comment_id, "eyes", installation_id)
@@ -943,8 +959,8 @@ class GitBot:
         files = self.github.list_pr_files(
             repo_name=repo_name,
             number=pr_number,
-            max_files=0,
-            max_patch_chars=0,
+            max_files=self.settings.max_pr_files,
+            max_patch_chars=self.settings.max_patch_chars,
             installation_id=installation_id,
         )
         memory_notes = self.state.get_memory(repo_name, pr_number)
@@ -1230,6 +1246,46 @@ class GitBot:
             lines.append("")
             lines.append("No critical findings detected.")
         return "\n".join(lines)
+
+    @staticmethod
+    def _is_infra_suggestion(item: str) -> bool:
+        normalized = item.lower()
+        return (
+            "verify ai provider configuration and credentials" in normalized
+            or ("google_cloud_project" in normalized and "vertex_model" in normalized)
+        )
+
+    def _normalize_suggestions(self, items: list[str]) -> list[str]:
+        seen: set[str] = set()
+        output: list[str] = []
+        for raw in items:
+            suggestion = str(raw or "").strip()
+            if not suggestion:
+                continue
+            if self._is_infra_suggestion(suggestion):
+                continue
+            key = suggestion.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            output.append(suggestion)
+        return output
+
+    def _suggestions_from_result(self, result: ReviewResult) -> list[str]:
+        suggestions = self._normalize_suggestions(list(result.suggestions))
+        if suggestions:
+            return suggestions
+
+        # Fallback: derive concrete action bullets from findings when model suggestions are sparse.
+        fallback: list[str] = []
+        for finding in result.findings:
+            if finding.suggestion and not self._is_infra_suggestion(finding.suggestion):
+                action = finding.suggestion.strip()
+            else:
+                action = f"Address {finding.category} issue: {finding.message.strip()}"
+            line = f"`{finding.file}`: {action}" if finding.file and finding.file != "*" else action
+            fallback.append(line)
+        return self._normalize_suggestions(fallback)
 
     def _format_fullcheck_summary(self, result: ReviewResult, check_url: str) -> str:
         good = [name for name, ok in sorted(result.check_results.items()) if ok]

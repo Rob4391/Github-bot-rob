@@ -310,27 +310,38 @@ class GitHubOps:
     def _intent_from_message(message: str) -> set[str]:
         normalized = message.lower()
         intents: set[str] = set()
-        if "debug logging found (print" in normalized:
+        if "debug log" in normalized or re.search(r"\bprint\s*\(", normalized):
             intents.add("remove_print")
-        if "debug logging found (console.log" in normalized:
+        if "debug log" in normalized or "console.log" in normalized:
             intents.add("remove_console_log")
-        if "todo marker found" in normalized:
+        if "todo marker found" in normalized or re.search(r"\btodo\b", normalized):
             intents.add("todo_cleanup")
-        if "fixme marker found" in normalized:
+        if "fixme marker found" in normalized or re.search(r"\bfixme\b", normalized):
             intents.add("fixme_cleanup")
-        if "broad exception catch detected" in normalized:
+        if (
+            "broad exception catch" in normalized
+            or "generic exception catch" in normalized
+            or "catch-all exception" in normalized
+            or re.search(r"except\s+exception", normalized)
+        ):
             intents.add("narrow_exception")
         if (
             "hardcoded secret" in normalized
+            or "hard-coded secret" in normalized
             or "secret handling" in normalized
             or "private key handling" in normalized
             or "token hardcoding" in normalized
             or "credential handling" in normalized
+            or "hardcoded credential" in normalized
+            or "hardcoded api key" in normalized
+            or "hardcoded token" in normalized
+            or "hardcoded password" in normalized
+            or re.search(r"\b(api[_ -]?key|token|password|secret|private[_ -]?key|credential)s?\b", normalized)
         ):
             intents.add("secret_to_env")
-        if "use of eval detected" in normalized:
+        if "use of eval detected" in normalized or re.search(r"\beval\s*\(", normalized):
             intents.add("eval_found")
-        if "use of exec detected" in normalized:
+        if "use of exec detected" in normalized or re.search(r"\bexec\s*\(", normalized):
             intents.add("exec_found")
         return intents
 
@@ -498,8 +509,13 @@ class GitHubOps:
         intents: set[str] = set()
         for finding in findings:
             intents.update(cls._intent_from_message(str(finding.get("message", ""))))
+            intents.update(cls._intent_from_message(str(finding.get("suggestion", ""))))
 
         unresolved: list[str] = []
+        if not intents:
+            unresolved.append("no known safe rewrite intent detected from findings.")
+            return content, [], unresolved
+
         if "eval_found" in intents:
             unresolved.append("eval usage requires manual refactor.")
         if "exec_found" in intents:

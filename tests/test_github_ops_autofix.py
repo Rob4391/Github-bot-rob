@@ -87,6 +87,38 @@ class TestGitHubOpsAutofix(unittest.TestCase):
         self.assertEqual(applied, [])
         self.assertTrue(any("eval" in item for item in unresolved))
 
+    def test_generic_vertex_wording_maps_to_autofix_intents(self) -> None:
+        original = (
+            "API_TOKEN = \"abcd1234\"\n"
+            "try:\n"
+            "    work()\n"
+            "except Exception:\n"
+            "    pass\n"
+        )
+        findings = [
+            {
+                "message": "Hardcoded API key detected in source.",
+                "suggestion": "Move credentials to environment variables.",
+            },
+            {
+                "message": "Catch-all exception handler may hide failures.",
+                "suggestion": "Avoid except Exception and re-raise.",
+            },
+        ]
+
+        updated, applied, unresolved = GitHubOps._apply_safe_autofixes(
+            path="app/sample.py",
+            content=original,
+            findings=findings,
+        )
+
+        self.assertIn('API_TOKEN = os.getenv("API_TOKEN", "")', updated)
+        self.assertIn("except Exception as exc:", updated)
+        self.assertIn("raise", updated)
+        self.assertIn("secret_to_env", applied)
+        self.assertIn("narrow_exception", applied)
+        self.assertEqual(unresolved, [])
+
 
 if __name__ == "__main__":
     unittest.main()

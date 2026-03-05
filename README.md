@@ -25,7 +25,8 @@ Personal GitHub assistant bot PoC with GitHub App auth and interactive PR comman
 - `/gitbot fullcheck`
 - `/gitbot check security|tests|docs|dependencies|size|quality|all`
 - `/gitbot explain <finding-id>`
-- `/gitbot suggest`
+- `/gitbot suggest` (fresh PR-aware suggestions)
+- `/gitbot suggest cached` (reuse cached suggestions)
 - `/gitbot remember <note>`
 - `/gitbot memory`
 - `/gitbot profile strict|balanced|fast`
@@ -104,6 +105,13 @@ REQUIRE_GREEN_CHECKS_FOR_APPROVE=true
 HIGH_RISK_THRESHOLD=70
 AUTO_FULLCHECK_ON_PR_EVENTS=false
 AI_MEME_MODE=on-demand
+MAX_PR_FILES=25
+MAX_PATCH_CHARS=4000
+MIN_INSTANCES=1
+CPU=1
+MEMORY=1Gi
+CONCURRENCY=40
+REQUEST_TIMEOUT=120
 STATE_FILE=.gitbot_state.json
 ```
 
@@ -115,6 +123,8 @@ AI mode:
 - Cost controls:
   - `AUTO_FULLCHECK_ON_PR_EVENTS=false` skips automatic PR-open/sync reviews (run `/gitbot review` or `/gitbot fullcheck` manually).
   - `AI_MEME_MODE=off|on-demand|always` controls AI meme calls.
+  - `MAX_PR_FILES` and `MAX_PATCH_CHARS` cap review payload sent to Vertex (lower = faster/cheaper).
+  - `MIN_INSTANCES`, `CPU`, `MEMORY`, `CONCURRENCY`, `REQUEST_TIMEOUT` tune Cloud Run latency/throughput.
 
 ### Cost-Optimized Routing
 
