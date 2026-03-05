@@ -1,8 +1,0 @@
-{
-	email {$EMAIL}
-}
-
-{$DOMAIN} {
-	encode gzip
-	reverse_proxy gitbot:8080
-}

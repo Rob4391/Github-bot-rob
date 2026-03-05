@@ -1,7 +1,10 @@
 .env
+.env.local
 .venv/
 __pycache__/
 *.pyc
 .gitbot/
 .gitbot_state.json
 secrets/
+.env.cloudrun
+.env.cloudrun.local

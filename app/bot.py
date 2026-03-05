@@ -1,37 +1,14 @@
-from github.GithubException import GithubException
+try:
+    from github.GithubException import GithubException
+except Exception:  # pragma: no cover - fallback for lightweight local test envs
+    class GithubException(Exception):
+        data: dict | None = None
 
 from .ai import ALLOWED_CHECKS, BotIntelligence, Finding, ReviewResult
 from .config import Settings
 from .github_ops import GitHubOps
+from .release_policy import resolve_bump_type, should_create_release
 from .state import BotState
-
-
-MEME_LIBRARY = {
-    "good": [
-        "https://media.giphy.com/media/111ebonMs90YLu/giphy.gif",
-        "https://media.giphy.com/media/26tOZ42Mg6pbTUPHW/giphy.gif",
-        "https://media.giphy.com/media/3o6ZtaO9BZHcOjmErm/giphy.gif",
-        "https://media.giphy.com/media/l4FGGafcOHmrlQxG0/giphy.gif",
-        "https://media.giphy.com/media/26ufdipQqU2lhNA4g/giphy.gif",
-        "https://media.giphy.com/media/xT0xeJpnrWC4XWblEk/giphy.gif",
-    ],
-    "risky": [
-        "https://media.giphy.com/media/3o7qE1YN7aBOFPRw8E/giphy.gif",
-        "https://media.giphy.com/media/13HgwGsXF0aiGY/giphy.gif",
-        "https://media.giphy.com/media/3oriO0OEd9QIDdllqo/giphy.gif",
-        "https://media.giphy.com/media/l0HlBO7eyXzSZkJri/giphy.gif",
-        "https://media.giphy.com/media/3o6gDUY3B8ocAgMNhu/giphy.gif",
-        "https://media.giphy.com/media/9M5jK4GXmD5o1irGrF/giphy.gif",
-    ],
-    "fail": [
-        "https://media.giphy.com/media/9Y5BbDSkSTiY8/giphy.gif",
-        "https://media.giphy.com/media/ISOckXUybVfQ4/giphy.gif",
-        "https://media.giphy.com/media/3orieQxTqzN4Xv1Q9y/giphy.gif",
-        "https://media.giphy.com/media/l4EoYvSFAO0BjGcU0/giphy.gif",
-        "https://media.giphy.com/media/3o6ZsY8YxKpVx3h2Zw/giphy.gif",
-        "https://media.giphy.com/media/l2JehQ2GitHGdVG9y/giphy.gif",
-    ],
-}
 
 
 class GitBot:
@@ -71,45 +48,73 @@ class GitBot:
         if action in {"opened", "reopened", "synchronize", "ready_for_review"} and not pr.get(
             "draft", False
         ):
-            result, check_url = self._run_fullcheck(
-                repo_name=repo_name,
-                pr_number=pr_number,
-                installation_id=installation_id,
-                selected_checks=set(ALLOWED_CHECKS),
-            )
-            self._safe_issue_comment(
-                repo_name=repo_name,
-                installation_id=installation_id,
-                issue_number=pr_number,
-                body=self._format_fullcheck_summary(result, check_url),
-            )
+            if not self.settings.auto_fullcheck_on_pr_events:
+                actions.append("auto fullcheck skipped: AUTO_FULLCHECK_ON_PR_EVENTS=false")
+            else:
+                result, check_url = self._run_fullcheck(
+                    repo_name=repo_name,
+                    pr_number=pr_number,
+                    installation_id=installation_id,
+                    selected_checks=set(ALLOWED_CHECKS),
+                )
+                self._safe_issue_comment(
+                    repo_name=repo_name,
+                    installation_id=installation_id,
+                    issue_number=pr_number,
+                    body=self._format_fullcheck_summary(result, check_url),
+                )
 
-            review_event = self._review_event_for_result(
-                repo_name=repo_name,
-                pr_number=pr_number,
-                installation_id=installation_id,
-                result=result,
-            )
-            body = self._format_review(result)
-            self.github.post_pr_review(
-                repo_name=repo_name,
-                number=pr_number,
-                body=body,
-                event=review_event,
-                installation_id=installation_id,
-            )
-            actions.append(f"fullcheck+review posted for PR #{pr_number}: {review_event}")
+                review_event = self._review_event_for_result(
+                    repo_name=repo_name,
+                    pr_number=pr_number,
+                    installation_id=installation_id,
+                    result=result,
+                )
+                body = self._format_review(result)
+                self.github.post_pr_review(
+                    repo_name=repo_name,
+                    number=pr_number,
+                    body=body,
+                    event=review_event,
+                    installation_id=installation_id,
+                )
+                actions.append(f"fullcheck+review posted for PR #{pr_number}: {review_event}")
 
-            self._post_meme(
-                repo_name=repo_name,
-                pr_number=pr_number,
-                installation_id=installation_id,
-                bucket=self._meme_bucket(result.risk_score, ok=result.approve),
-                reason="Auto fullcheck complete",
-            )
+                self._post_meme(
+                    repo_name=repo_name,
+                    pr_number=pr_number,
+                    installation_id=installation_id,
+                    bucket=self._meme_bucket(result.risk_score, ok=result.approve),
+                    reason="Auto fullcheck complete",
+                )
 
         if action == "closed" and bool(pr.get("merged")):
-            bump_type = self._resolve_bump_type(pr.get("labels", []))
+            changed = self.github.list_pr_files(
+                repo_name=repo_name,
+                number=pr_number,
+                max_files=0,
+                max_patch_chars=0,
+                installation_id=installation_id,
+            )
+            changed_paths = [item.filename for item in changed]
+            if not should_create_release(changed_paths):
+                self.github.add_issue_comment(
+                    repo_name=repo_name,
+                    issue_number=pr_number,
+                    body=(
+                        "Automated release skipped (no release-worthy code/dependency changes detected)."
+                    ),
+                    installation_id=installation_id,
+                )
+                actions.append("release skipped: no release-worthy changes")
+                return actions
+
+            bump_type = resolve_bump_type(
+                labels=pr.get("labels", []),
+                title=str(pr.get("title", "") or ""),
+                description=str(pr.get("body", "") or ""),
+                changed_files=changed_paths,
+            )
             try:
                 old_version, new_version = self.github.bump_version_file(
                     repo_name=repo_name,
@@ -186,7 +191,14 @@ class GitBot:
             return ["ignored issue_comment: not on pull request"]
 
         association = payload["comment"].get("author_association", "")
-        if association not in {"OWNER", "MEMBER", "COLLABORATOR"}:
+        if association not in {
+            "OWNER",
+            "MEMBER",
+            "COLLABORATOR",
+            "CONTRIBUTOR",
+            "FIRST_TIMER",
+            "FIRST_TIME_CONTRIBUTOR",
+        }:
             return [f"ignored command: author association '{association}' not allowed"]
 
         comment_body = (payload["comment"].get("body") or "").strip()
@@ -215,6 +227,7 @@ class GitBot:
         meme_bucket: str | None = None
         meme_reason = f"Command `{command}` completed"
         meme_failed = False
+        meme_explicit_request = False
         try:
             if command == "review":
                 profile = self._profile_for_repo(repo_name)
@@ -543,6 +556,7 @@ class GitBot:
                 bucket = self._meme_bucket(risk_score=risk, ok=risk < self.settings.high_risk_threshold)
                 meme_bucket = bucket
                 meme_reason = "Requested meme"
+                meme_explicit_request = True
                 self._react_to_comment(repo_name, comment_id, "laugh", installation_id)
                 return ["meme posted"]
 
@@ -747,6 +761,7 @@ class GitBot:
                 reason=meme_reason,
                 bucket=meme_bucket,
                 failed=meme_failed,
+                explicit_request=meme_explicit_request,
             )
 
     def _handle_check_run(self, payload: dict, installation_id: int | None) -> list[str]:
@@ -928,8 +943,8 @@ class GitBot:
         files = self.github.list_pr_files(
             repo_name=repo_name,
             number=pr_number,
-            max_files=self.settings.max_pr_files,
-            max_patch_chars=self.settings.max_patch_chars,
+            max_files=0,
+            max_patch_chars=0,
             installation_id=installation_id,
         )
         memory_notes = self.state.get_memory(repo_name, pr_number)
@@ -1097,15 +1112,6 @@ class GitBot:
         if installation_id is None:
             return None
         return int(installation_id)
-
-    @staticmethod
-    def _resolve_bump_type(labels: list[dict]) -> str:
-        names = {str(item.get("name", "")).lower() for item in labels}
-        if "major" in names:
-            return "major"
-        if "minor" in names:
-            return "minor"
-        return "patch"
 
     @staticmethod
     def _resolve_merge_method(args: list[str]) -> str | None:
@@ -1301,14 +1307,31 @@ class GitBot:
         installation_id: int | None,
         bucket: str,
         reason: str,
+        explicit_request: bool = False,
     ) -> None:
-        pool = MEME_LIBRARY.get(bucket, MEME_LIBRARY["good"])
-        index = self.state.next_meme_index(repo_name=repo_name, bucket=bucket, pool_size=len(pool))
-        meme_url = pool[index]
+        if not self._should_post_meme(repo_name=repo_name, explicit_request=explicit_request):
+            return
+
+        generated = self.brain.generate_meme(
+            bucket=bucket,
+            reason=reason,
+            repo_name=repo_name,
+            pr_number=pr_number,
+        )
+        if generated:
+            title = str(generated.get("title", "Meme Break")).strip() or "Meme Break"
+            setup = str(generated.get("setup", "")).strip()
+            punchline = str(generated.get("punchline", "")).strip()
+        else:
+            title = f"Meme Break `{bucket}`"
+            setup = f"Reason: {reason}"
+            punchline = "Vertex meme generator was unavailable for this event."
+
         body = (
-            f"### Meme Break `{bucket}`\n"
-            f"_Reason: {reason}_\n\n"
-            f"![gitbot-meme]({meme_url})"
+            f"### {title}\n"
+            f"_Bucket: `{bucket}`_\n\n"
+            f"> {setup}\n\n"
+            f"**{punchline}**"
         )
         self._safe_issue_comment(
             repo_name=repo_name,
@@ -1325,8 +1348,9 @@ class GitBot:
         reason: str,
         bucket: str | None = None,
         failed: bool = False,
+        explicit_request: bool = False,
     ) -> None:
-        if not self.state.get_meme_mode(repo_name):
+        if not self._should_post_meme(repo_name=repo_name, explicit_request=explicit_request):
             return
         resolved_bucket = bucket
         if not resolved_bucket:
@@ -1346,7 +1370,18 @@ class GitBot:
             installation_id=installation_id,
             bucket=resolved_bucket,
             reason=reason,
+            explicit_request=explicit_request,
         )
+
+    def _should_post_meme(self, repo_name: str, explicit_request: bool) -> bool:
+        if not self.state.get_meme_mode(repo_name):
+            return False
+        mode = self.settings.ai_meme_mode
+        if mode == "always":
+            return True
+        if mode == "on-demand":
+            return explicit_request
+        return False
 
     @staticmethod
     def _meme_bucket(risk_score: int, ok: bool) -> str:

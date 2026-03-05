@@ -10,13 +10,14 @@ Personal GitHub assistant bot PoC with GitHub App auth and interactive PR comman
 - Interactive commands from PR comments
 - Semantic version bumping (`major` / `minor` / `patch`)
 - Tag + release creation with changelog summary
+- Smart merge release policy: auto-skip docs-only PRs, auto-pick bump type from PR labels/title/body/files, then create tag+release
 - Auto labels (`high-risk`, `needs-tests`, `security`, `feature`, `bug`, `breaking-change`)
 - Selective checks (`security`, `tests`, `docs`, `dependencies`, `size`, `quality`)
 - Explain mode (`/gitbot explain F1`) and suggestions mode (`/gitbot suggest`)
 - Conversation memory per PR (`/gitbot remember ...`, `/gitbot memory`)
 - Policy profiles (`strict`, `balanced`, `fast`)
 - Autofix in-place branch updates (`/gitbot autofix`)
-- Final meme response for command/operation outcomes (success/failure)
+- Vertex AI-generated meme response for command/operation outcomes (success/failure)
 
 ## Commands
 
@@ -90,16 +91,49 @@ GITHUB_WEBHOOK_SECRET=<webhook-secret>
 Optional:
 
 ```bash
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4.1-mini
+GOOGLE_CLOUD_PROJECT=<your-gcp-project-id>
+VERTEX_LOCATION=asia-south1
+VERTEX_MODEL=gemini-2.0-flash-001
+VERTEX_TIMEOUT_SECONDS=300
+VERTEX_MAX_OUTPUT_TOKENS=512
+VERTEX_TEMPERATURE=0.0
+LLM_REQUIRED=true
 BOT_COMMAND_PREFIX=/gitbot
 AUTO_APPROVE_CONFIDENCE=0.85
-MAX_PR_FILES=60
-MAX_PATCH_CHARS=8000
 REQUIRE_GREEN_CHECKS_FOR_APPROVE=true
 HIGH_RISK_THRESHOLD=70
+AUTO_FULLCHECK_ON_PR_EVENTS=false
+AI_MEME_MODE=on-demand
 STATE_FILE=.gitbot_state.json
 ```
+
+AI mode:
+
+- Runtime is enforced to `Vertex AI only`.
+- Fallback-to-rules is disabled in app runtime.
+- PR review file ingestion is uncapped in bot runtime (all changed files/patches are sent to Vertex in batches).
+- Cost controls:
+  - `AUTO_FULLCHECK_ON_PR_EVENTS=false` skips automatic PR-open/sync reviews (run `/gitbot review` or `/gitbot fullcheck` manually).
+  - `AI_MEME_MODE=off|on-demand|always` controls AI meme calls.
+
+### Cost-Optimized Routing
+
+Static/non-AI operations:
+
+- `/gitbot approve`
+- `/gitbot merge [squash|merge|rebase]`
+- `/gitbot close`, `/gitbot reopen`
+- `/gitbot bump patch|minor|major`
+- `/gitbot release`
+- `/gitbot remember`, `/gitbot memory`, `/gitbot profile`
+- `/gitbot autofix` (safe deterministic rewrites from findings)
+
+Vertex AI operations:
+
+- `/gitbot review`
+- `/gitbot fullcheck`
+- `/gitbot check security|tests|docs|dependencies|size|quality|all`
+- `/gitbot meme now` (and optional auto memes when `AI_MEME_MODE=always`)
 
 Auth mode:
 
@@ -112,35 +146,52 @@ Auth mode:
 uvicorn app.main:app --host 127.0.0.1 --port 8080
 ```
 
-### 4) No-domain Docker mode (recommended)
+### 3.1) Vertex AI integration
 
-If you do not own a domain yet, run GitBot and tunnel in Docker:
-
-```bash
-make up
-```
-
-Get webhook base URL:
+Use Application Default Credentials locally:
 
 ```bash
-make url
+gcloud auth application-default login
 ```
 
-Webhook URL format:
-
-`https://<trycloudflare-url>/webhook`
-
-Useful commands:
+Set in `.env`:
 
 ```bash
-make health
-make logs
-make down
+GOOGLE_CLOUD_PROJECT=<your-gcp-project-id>
+VERTEX_LOCATION=asia-south1
+VERTEX_MODEL=gemini-2.0-flash-001
+VERTEX_TIMEOUT_SECONDS=300
+VERTEX_MAX_OUTPUT_TOKENS=512
+VERTEX_TEMPERATURE=0.0
 ```
 
-Note: `trycloudflare` URL can change after restart, so update webhook URL if needed.
+Required IAM role on the runtime identity:
 
-### 5) Alternative: expose webhook with ngrok
+- `roles/aiplatform.user`
+
+### 3.2) Deploy to Cloud Run + Vertex AI
+
+Fill required deploy values in root `.env` (`PROJECT_ID`, `REGION`, `SERVICE_NAME`,
+`REPO_NAME`, `IMAGE_NAME`, `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET`,
+`GITHUB_APP_PRIVATE_KEY_PATH`), then deploy:
+
+```bash
+./cloudrun.sh
+```
+
+Image tagging behavior:
+
+- Every deploy automatically bumps `VERSION` and uses it as image tag.
+- Default bump is `patch` (for example `0.1.2 -> 0.1.3`).
+- Set `BUMP_PART=minor` or `BUMP_PART=major` when needed.
+
+Optional: use a custom env file path:
+
+```bash
+./cloudrun.sh /absolute/path/to/my-cloudrun.env
+```
+
+### 4) Alternative: expose webhook with ngrok
 
 ```bash
 ngrok http 8080

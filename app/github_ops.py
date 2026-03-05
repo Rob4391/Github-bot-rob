@@ -58,9 +58,10 @@ class GitHubOps:
         _, pr = self.get_pull_request(repo_name, number, installation_id)
         result: list[ChangedFile] = []
         for idx, file in enumerate(pr.get_files()):
-            if idx >= max_files:
+            if max_files > 0 and idx >= max_files:
                 break
-            patch = (file.patch or "")[:max_patch_chars]
+            raw_patch = file.patch or ""
+            patch = raw_patch if max_patch_chars <= 0 else raw_patch[:max_patch_chars]
             result.append(
                 ChangedFile(
                     filename=file.filename,

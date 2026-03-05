@@ -119,6 +119,34 @@ class TestBotIntelligence(unittest.TestCase):
         self.assertTrue(any("hardcoded secret" in msg.lower() for msg in security_messages))
         self.assertTrue(any("eval" in msg.lower() for msg in security_messages))
 
+    def test_llm_required_returns_unavailable_when_provider_fails(self) -> None:
+        brain = BotIntelligence(
+            openai_api_key=None,
+            model="gemini-2.0-flash-001",
+            ai_provider="vertex",
+            vertex_project=None,
+            vertex_model="gemini-2.0-flash-001",
+            llm_required=True,
+        )
+        files = [
+            ChangedFile(
+                filename="app/x.py",
+                status="modified",
+                additions=2,
+                deletions=0,
+                patch="+x = 1\n",
+            )
+        ]
+        result = brain.review_pull_request(
+            title="llm strict",
+            description="",
+            changed_files=files,
+            profile="balanced",
+        )
+        self.assertEqual(result.source, "llm-unavailable")
+        self.assertFalse(result.approve)
+        self.assertEqual(result.risk_score, 100)
+
 
 if __name__ == "__main__":
     unittest.main()
